@@ -1,5 +1,8 @@
 HELP.md
 target/
+.idea/
+*.log
+application-local.yml
 .mvn/wrapper/maven-wrapper.jar
 !**/src/main/**/target/
 !**/src/test/**/target/

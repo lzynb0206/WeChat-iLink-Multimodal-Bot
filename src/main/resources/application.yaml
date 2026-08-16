@@ -1,3 +1,10 @@
 spring:
   application:
     name: Demo
+
+
+
+
+logging:
+  level:
+    root: DEBUG
