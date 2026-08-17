@@ -3,6 +3,7 @@ target/
 .idea/
 *.log
 application-local.yml
+**/application-local.yml
 .mvn/wrapper/maven-wrapper.jar
 !**/src/main/**/target/
 !**/src/test/**/target/
@@ -34,3 +35,6 @@ build/
 
 ### VS Code ###
 .vscode/
+
+.env
+downloads/

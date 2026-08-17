@@ -2,9 +2,19 @@ spring:
   application:
     name: Demo
 
-
-
-
 logging:
   level:
-    root: DEBUG
+    root: INFO
+
+project:
+  version: 1.0.0
+
+wechat:
+  bot:
+    enabled: ${WECHAT_BOT_ENABLED:false}
+    download-dir: ${WECHAT_DOWNLOAD_DIR:downloads}
+
+llm:
+  api-url: ${LLM_API_URL:https://api.openai.com/v1/chat/completions}
+  api-key: ${LLM_API_KEY:}
+  model: ${LLM_MODEL:gpt-4o-mini}
