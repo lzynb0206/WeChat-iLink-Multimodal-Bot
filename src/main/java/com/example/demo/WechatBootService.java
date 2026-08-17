@@ -27,6 +27,7 @@ import java.util.concurrent.Executors;
 public class WechatBootService implements DisposableBean {
 
     private final LlmService llmService;
+    private final MediaAiService mediaAiService;
     private ILinkClient client;
     private ExecutorService botExecutor;
 
@@ -39,8 +40,9 @@ public class WechatBootService implements DisposableBean {
     @Value("${wechat.bot.qr-code-path:wechat-login-qr.png}")
     private String qrCodePath;
 
-    public WechatBootService(LlmService llmService) {
+    public WechatBootService(LlmService llmService, MediaAiService mediaAiService) {
         this.llmService = llmService;
+        this.mediaAiService = mediaAiService;
     }
 
     @org.springframework.context.event.EventListener(org.springframework.boot.context.event.ApplicationReadyEvent.class)
@@ -91,6 +93,10 @@ public class WechatBootService implements DisposableBean {
                                 if (item.getImage_item() != null) {
                                     handleImage(fromUserId, item);
                                 }
+
+                                if (item.getVoice_item() != null) {
+                                    handleVoice(fromUserId, item);
+                                }
                             }
                         }
                     }
@@ -126,8 +132,14 @@ public class WechatBootService implements DisposableBean {
         log.info("收到微信文本消息 userId={}", fromUserId);
         try {
             client.startTyping(fromUserId);
-            String aiAnswer = llmService.chat(userText);
+            boolean voiceReply = userText.startsWith("语音：") || userText.startsWith("语音:");
+            String prompt = voiceReply ? userText.substring(3).trim() : userText;
+            String aiAnswer = llmService.chat(prompt);
             client.sendText(fromUserId, aiAnswer);
+            if (voiceReply && mediaAiService.isConfigured()) {
+                byte[] wav = mediaAiService.synthesizeSpeech(aiAnswer);
+                client.sendFile(fromUserId, wav, "deepseek-answer.wav", "DeepSeek 语音回复");
+            }
         } catch (Exception e) {
             log.error("处理文本消息失败 userId={}", fromUserId, e);
         } finally {
@@ -144,8 +156,14 @@ public class WechatBootService implements DisposableBean {
             Path directory = Path.of(downloadDir).toAbsolutePath().normalize();
             Files.createDirectories(directory);
             Path target = Files.createTempFile(directory, "wechat-image-", ".jpg");
-            Files.write(target, client.downloadImageFromMessageItem(item));
-            client.sendText(fromUserId, "图片已收到并保存。文件名：" + target.getFileName());
+            byte[] imageBytes = client.downloadImageFromMessageItem(item);
+            Files.write(target, imageBytes);
+            if (mediaAiService.isConfigured()) {
+                String answer = mediaAiService.understandImage(imageBytes, "image/jpeg");
+                client.sendText(fromUserId, answer);
+            } else {
+                client.sendText(fromUserId, "图片已收到。请配置 DASHSCOPE_API_KEY 后启用图片理解。");
+            }
             log.info("微信图片已保存至 {}", target);
         } catch (Exception e) {
             log.error("处理图片消息失败 userId={}", fromUserId, e);
@@ -153,6 +171,24 @@ public class WechatBootService implements DisposableBean {
                 client.sendText(fromUserId, "图片处理失败，请稍后重试。");
             } catch (Exception sendException) {
                 log.debug("发送图片失败提示失败", sendException);
+            }
+        }
+    }
+
+    private void handleVoice(String fromUserId, MessageItem item) {
+        try {
+            Path directory = Path.of(downloadDir).toAbsolutePath().normalize();
+            Files.createDirectories(directory);
+            Path target = Files.createTempFile(directory, "wechat-voice-", ".silk");
+            Files.write(target, client.downloadVoiceFromMessageItem(item));
+            client.sendText(fromUserId, "语音已收到并保存。当前微信语音为 SILK 格式，需要转换为 WAV 并提供公网地址后才能交给 paraformer-v2 识别。");
+            log.info("微信 SILK 语音已保存至 {}", target);
+        } catch (Exception e) {
+            log.error("处理语音消息失败 userId={}", fromUserId, e);
+            try {
+                client.sendText(fromUserId, "语音处理失败，请稍后重试。");
+            } catch (Exception sendException) {
+                log.debug("发送语音失败提示失败", sendException);
             }
         }
     }

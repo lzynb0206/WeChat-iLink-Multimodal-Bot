@@ -21,3 +21,12 @@ llm:
   api-url: ${DEEPSEEK_API_URL:https://api.deepseek.com/chat/completions}
   api-key: ${DEEPSEEK_API_KEY:}
   model: ${DEEPSEEK_MODEL:deepseek-v4-flash}
+
+dashscope:
+  api-key: ${DASHSCOPE_API_KEY:}
+  compatible-api-url: ${DASHSCOPE_COMPATIBLE_API_URL:https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions}
+  api-url: ${DASHSCOPE_API_URL:https://dashscope.aliyuncs.com/api/v1}
+  vision-model: ${DASHSCOPE_VISION_MODEL:qwen3-vl-flash}
+  asr-model: ${DASHSCOPE_ASR_MODEL:paraformer-v2}
+  tts-model: ${DASHSCOPE_TTS_MODEL:cosyvoice-v3.5-flash}
+  tts-voice: ${DASHSCOPE_TTS_VOICE:longanyang}
