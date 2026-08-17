@@ -28,7 +28,7 @@ public class LlmService {
      */
     public String chat(String userPrompt) {
         if (!StringUtils.hasText(llmConfig.getApiKey())) {
-            return "大模型尚未配置，请先设置 LLM_API_KEY。";
+            return "DeepSeek 尚未配置，请先设置 DEEPSEEK_API_KEY。";
         }
         try {
             HttpHeaders headers = new HttpHeaders();

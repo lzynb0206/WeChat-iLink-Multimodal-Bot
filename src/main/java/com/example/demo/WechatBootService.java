@@ -8,6 +8,10 @@ import com.github.wechat.ilink.sdk.core.login.LoginContext;
 import com.github.wechat.ilink.sdk.core.model.MessageItem;
 import com.github.wechat.ilink.sdk.core.model.WeixinMessage;
 import lombok.extern.slf4j.Slf4j;
+import com.google.zxing.BarcodeFormat;
+import com.google.zxing.client.j2se.MatrixToImageWriter;
+import com.google.zxing.common.BitMatrix;
+import com.google.zxing.qrcode.QRCodeWriter;
 import org.springframework.beans.factory.DisposableBean;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -31,6 +35,9 @@ public class WechatBootService implements DisposableBean {
 
     @Value("${wechat.bot.download-dir:downloads}")
     private String downloadDir;
+
+    @Value("${wechat.bot.qr-code-path:wechat-login-qr.png}")
+    private String qrCodePath;
 
     public WechatBootService(LlmService llmService) {
         this.llmService = llmService;
@@ -92,7 +99,8 @@ public class WechatBootService implements DisposableBean {
 
         try {
             String qrCodeContent = client.executeLogin();
-            log.info("微信登录二维码内容（请渲染为二维码后扫码）：{}", qrCodeContent);
+            Path qrPath = writeQrCode(qrCodeContent);
+            log.info("微信登录二维码已生成：{}，请用微信扫码", qrPath);
             LoginContext context = client.getLoginFuture().get();
             log.info("微信登录完成 botId={}", context.getBotId());
         } catch (InterruptedException e) {
@@ -101,6 +109,17 @@ public class WechatBootService implements DisposableBean {
         } catch (Exception e) {
             log.error("微信机器人启动失败", e);
         }
+    }
+
+    private Path writeQrCode(String content) throws Exception {
+        Path target = Path.of(qrCodePath).toAbsolutePath().normalize();
+        Path parent = target.getParent();
+        if (parent != null) {
+            Files.createDirectories(parent);
+        }
+        BitMatrix matrix = new QRCodeWriter().encode(content, BarcodeFormat.QR_CODE, 360, 360);
+        MatrixToImageWriter.writeToPath(matrix, "PNG", target);
+        return target;
     }
 
     private void handleText(String fromUserId, String userText) {

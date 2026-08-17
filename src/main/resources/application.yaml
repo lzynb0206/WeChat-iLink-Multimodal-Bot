@@ -1,6 +1,8 @@
 spring:
   application:
     name: Demo
+  config:
+    import: optional:classpath:application-local.yml
 
 logging:
   level:
@@ -11,10 +13,11 @@ project:
 
 wechat:
   bot:
-    enabled: ${WECHAT_BOT_ENABLED:false}
+    enabled: ${WECHAT_BOT_ENABLED:true}
     download-dir: ${WECHAT_DOWNLOAD_DIR:downloads}
+    qr-code-path: ${WECHAT_QR_CODE_PATH:wechat-login-qr.png}
 
 llm:
-  api-url: ${LLM_API_URL:https://api.openai.com/v1/chat/completions}
-  api-key: ${LLM_API_KEY:}
-  model: ${LLM_MODEL:gpt-4o-mini}
+  api-url: ${DEEPSEEK_API_URL:https://api.deepseek.com/chat/completions}
+  api-key: ${DEEPSEEK_API_KEY:}
+  model: ${DEEPSEEK_MODEL:deepseek-v4-flash}
