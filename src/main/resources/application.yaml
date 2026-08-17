@@ -1,34 +1,63 @@
+# Spring Boot 自身的配置。
 spring:
+  # 应用基本信息。
   application:
+    # 在日志中显示的应用名称。
     name: Demo
+  # 外部配置文件导入规则。
   config:
+    # 如果存在本地配置就加载；不存在也不会导致启动失败。
     import: optional:classpath:application-local.yml
 
+# 日志配置。
 logging:
+  # 不同包的日志级别。
   level:
+    # 默认打印 INFO 及以上级别，避免 DEBUG 日志过多。
     root: INFO
 
+# 项目自定义信息。
 project:
+  # /version 接口返回的版本号。
   version: 1.0.0
 
+# 微信机器人配置。
 wechat:
+  # 机器人具体参数。
   bot:
+    # 默认启用；可用环境变量 WECHAT_BOT_ENABLED=false 临时关闭。
     enabled: ${WECHAT_BOT_ENABLED:true}
+    # 只保存用户发送的图片；收到的语音处理后不会保存在这里。
     download-dir: ${WECHAT_DOWNLOAD_DIR:downloads}
+    # 每次启动时生成的微信登录二维码文件。
     qr-code-path: ${WECHAT_QR_CODE_PATH:wechat-login-qr.png}
 
+# DeepSeek 文本聊天配置。
 llm:
+  # DeepSeek Chat Completions 接口。
   api-url: ${DEEPSEEK_API_URL:https://api.deepseek.com/chat/completions}
+  # 优先读取环境变量；也可在 application-local.yml 中填写。
   api-key: ${DEEPSEEK_API_KEY:}
+  # 文本聊天模型名称。
   model: ${DEEPSEEK_MODEL:deepseek-v4-flash}
 
+# 阿里云百炼图片和语音模型配置。
 dashscope:
+  # 图片和语音模型共用的百炼 API Key。
   api-key: ${DASHSCOPE_API_KEY:}
+  # 图片理解和语音识别使用的 OpenAI 兼容接口。
   compatible-api-url: ${DASHSCOPE_COMPATIBLE_API_URL:https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions}
+  # 生图和语音合成使用的百炼原生 API 根地址。
   api-url: ${DASHSCOPE_API_URL:https://dashscope.aliyuncs.com/api/v1}
+  # 用户发送图片时负责理解图片。
   vision-model: ${DASHSCOPE_VISION_MODEL:qwen3-vl-flash}
+  # 用户要求生成图片时负责文生图。
   image-model: ${DASHSCOPE_IMAGE_MODEL:qwen-image-2.0}
+  # 微信语音转成 WAV 后负责识别文字。
   asr-model: ${DASHSCOPE_ASR_MODEL:qwen3-asr-flash}
+  # 负责把 DeepSeek 回答合成为 WAV。
   tts-model: ${DASHSCOPE_TTS_MODEL:cosyvoice-v3.5-flash}
+  # 语音合成使用的发音人。
   tts-voice: ${DASHSCOPE_TTS_VOICE:longanyang}
+  # 当前 Apple Silicon Mac 使用的本地 SILK 编解码程序。
   silk-codec-path: ${SILK_CODEC_PATH:tools/macos-arm64/silk_codec}
