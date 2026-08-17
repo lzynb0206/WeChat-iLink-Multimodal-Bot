@@ -28,6 +28,7 @@ public class WechatBootService implements DisposableBean {
 
     private final LlmService llmService;
     private final MediaAiService mediaAiService;
+    private final AudioTranscoder audioTranscoder;
     private ILinkClient client;
     private ExecutorService botExecutor;
 
@@ -40,9 +41,11 @@ public class WechatBootService implements DisposableBean {
     @Value("${wechat.bot.qr-code-path:wechat-login-qr.png}")
     private String qrCodePath;
 
-    public WechatBootService(LlmService llmService, MediaAiService mediaAiService) {
+    public WechatBootService(LlmService llmService, MediaAiService mediaAiService,
+                             AudioTranscoder audioTranscoder) {
         this.llmService = llmService;
         this.mediaAiService = mediaAiService;
+        this.audioTranscoder = audioTranscoder;
     }
 
     @org.springframework.context.event.EventListener(org.springframework.boot.context.event.ApplicationReadyEvent.class)
@@ -132,13 +135,21 @@ public class WechatBootService implements DisposableBean {
         log.info("收到微信文本消息 userId={}", fromUserId);
         try {
             client.startTyping(fromUserId);
+            if (isImageRequest(userText)) {
+                String prompt = imagePrompt(userText);
+                byte[] image = mediaAiService.generateImage(prompt);
+                client.sendImage(fromUserId, image, "qwen-image.png", prompt);
+                return;
+            }
             boolean voiceReply = userText.startsWith("语音：") || userText.startsWith("语音:");
             String prompt = voiceReply ? userText.substring(3).trim() : userText;
             String aiAnswer = llmService.chat(prompt);
             client.sendText(fromUserId, aiAnswer);
             if (voiceReply && mediaAiService.isConfigured()) {
                 byte[] wav = mediaAiService.synthesizeSpeech(aiAnswer);
-                client.sendFile(fromUserId, wav, "deepseek-answer.wav", "DeepSeek 语音回复");
+                byte[] silk = audioTranscoder.wavToSilk(wav);
+                client.sendVoice(fromUserId, silk, "deepseek-answer.silk",
+                        audioTranscoder.wavDurationMillis(wav), 24000);
             }
         } catch (Exception e) {
             log.error("处理文本消息失败 userId={}", fromUserId, e);
@@ -149,6 +160,15 @@ public class WechatBootService implements DisposableBean {
                 log.debug("停止输入状态失败 userId={}", fromUserId, e);
             }
         }
+    }
+
+    private boolean isImageRequest(String text) {
+        return text.startsWith("生成图片") || text.startsWith("生成一张")
+                || text.startsWith("画一张") || text.startsWith("帮我画");
+    }
+
+    private String imagePrompt(String text) {
+        return text.replaceFirst("^(生成图片[:：]?|生成一张|画一张|帮我画)", "").trim();
     }
 
     private void handleImage(String fromUserId, MessageItem item) {
@@ -180,8 +200,13 @@ public class WechatBootService implements DisposableBean {
             Path directory = Path.of(downloadDir).toAbsolutePath().normalize();
             Files.createDirectories(directory);
             Path target = Files.createTempFile(directory, "wechat-voice-", ".silk");
-            Files.write(target, client.downloadVoiceFromMessageItem(item));
-            client.sendText(fromUserId, "语音已收到并保存。当前微信语音为 SILK 格式，需要转换为 WAV 并提供公网地址后才能交给 paraformer-v2 识别。");
+            byte[] silk = client.downloadVoiceFromMessageItem(item);
+            Files.write(target, silk);
+            byte[] wav = audioTranscoder.silkToWav(silk);
+            String userText = mediaAiService.transcribeAudio(wav);
+            log.info("微信语音识别完成 userId={} text={}", fromUserId, userText);
+            String aiAnswer = llmService.chat(userText);
+            client.sendText(fromUserId, "你说：“" + userText + "”\n\n" + aiAnswer);
             log.info("微信 SILK 语音已保存至 {}", target);
         } catch (Exception e) {
             log.error("处理语音消息失败 userId={}", fromUserId, e);

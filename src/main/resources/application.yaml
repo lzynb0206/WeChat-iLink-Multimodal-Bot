@@ -27,6 +27,8 @@ dashscope:
   compatible-api-url: ${DASHSCOPE_COMPATIBLE_API_URL:https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions}
   api-url: ${DASHSCOPE_API_URL:https://dashscope.aliyuncs.com/api/v1}
   vision-model: ${DASHSCOPE_VISION_MODEL:qwen3-vl-flash}
-  asr-model: ${DASHSCOPE_ASR_MODEL:paraformer-v2}
+  image-model: ${DASHSCOPE_IMAGE_MODEL:qwen-image-2.0}
+  asr-model: ${DASHSCOPE_ASR_MODEL:qwen3-asr-flash}
   tts-model: ${DASHSCOPE_TTS_MODEL:cosyvoice-v3.5-flash}
   tts-voice: ${DASHSCOPE_TTS_VOICE:longanyang}
+  silk-codec-path: ${SILK_CODEC_PATH:tools/macos-arm64/silk_codec}

@@ -18,16 +18,16 @@ export DASHSCOPE_API_KEY="你的阿里云百炼 API Key"
 
 默认使用 DeepSeek 官方的 `https://api.deepseek.com/chat/completions` 和 `deepseek-v4-flash`。需要使用 Pro 模型时设置 `DEEPSEEK_MODEL=deepseek-v4-pro`。
 
-图片与语音模型使用同一个阿里云百炼 Key：`qwen3-vl-flash`、`paraformer-v2`、`cosyvoice-v3.5-flash`。也可以直接把 Key 填入被 Git 忽略的 `src/main/resources/application-local.yml`：
+图片与语音模型使用同一个阿里云百炼 Key：`qwen3-vl-flash`、`qwen-image-2.0`、`qwen3-asr-flash`、`cosyvoice-v3.5-flash`。也可以直接把 Key 填入被 Git 忽略的 `src/main/resources/application-local.yml`：
 
 ```yaml
 dashscope:
   api-key: "sk-你的百炼APIKey"
 ```
 
-发送普通图片时，机器人会调用千问进行图片理解。发送 `语音：你的问题` 时，机器人会返回文字答案和 CosyVoice 合成的 WAV 音频文件。
+发送普通图片时，机器人会调用千问进行图片理解。发送 `生成图片：一只小猫` 时会调用千问生图并把图片发回微信。发送微信语音时，项目会把 SILK 转为 WAV、识别文字，再交给 DeepSeek 回复。发送 `语音：你的问题` 时，会把 CosyVoice 音频转成 SILK 语音回复。
 
-微信收到的语音是 SILK 格式，而 `paraformer-v2` 只接受公网 HTTP/HTTPS 地址上的常见音频格式。项目已完成语音下载与 Paraformer 调用服务，完整的“收到微信语音后自动识别”还需要部署时配置 SILK 转 WAV 和公网临时文件地址。
+项目内置的 SILK 编解码器位于 `tools/macos-arm64/silk_codec`，适用于当前 Apple Silicon Mac。部署到其他系统时需要提供对应平台的编解码器，并通过 `SILK_CODEC_PATH` 指定路径。
 
 可选配置：`WECHAT_DOWNLOAD_DIR` 指定收到的图片保存目录，默认是 `downloads`。
 
