@@ -188,18 +188,7 @@ public class WechatBotService implements DisposableBean {
         }
 
         byte[] wav = aiService.synthesizeSpeech(text);
-        byte[] silk = audioTranscoder.wavToSilk(wav);
-        int duration = audioTranscoder.wavDurationMillis(wav);
-        client.sendVoice(
-                fromUserId,
-                silk,
-                "qwen-answer.silk",
-                duration,
-                AudioTranscoder.SAMPLE_RATE,
-                null,
-                6,
-                16,
-                text);
+        client.sendFile(fromUserId, wav, "qwen-answer.wav", null);
     }
 
     private void handleImage(String fromUserId, MessageItem item) {

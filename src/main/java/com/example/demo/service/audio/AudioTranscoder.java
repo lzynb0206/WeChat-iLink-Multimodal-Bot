@@ -10,7 +10,6 @@ import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Arrays;
 
 @Component
 public class AudioTranscoder {
@@ -32,24 +31,6 @@ public class AudioTranscoder {
             Files.deleteIfExists(silkFile);
             Files.deleteIfExists(pcmFile);
         }
-    }
-
-    public byte[] wavToSilk(byte[] wav) throws IOException, InterruptedException {
-        byte[] pcm = extractWavPcm(wav);
-        Path pcmFile = Files.createTempFile("tts-answer-", ".pcm");
-        Path silkFile = Files.createTempFile("tts-answer-", ".silk");
-        try {
-            Files.write(pcmFile, pcm);
-            runCodec("encode", pcmFile, silkFile);
-            return Files.readAllBytes(silkFile);
-        } finally {
-            Files.deleteIfExists(pcmFile);
-            Files.deleteIfExists(silkFile);
-        }
-    }
-
-    public int wavDurationMillis(byte[] wav) throws IOException {
-        return Math.max(1, extractWavPcm(wav).length * 1000 / (SAMPLE_RATE * 2));
     }
 
     private void runCodec(String operation, Path input, Path output)
@@ -89,30 +70,4 @@ public class AudioTranscoder {
         return output.toByteArray();
     }
 
-    private byte[] extractWavPcm(byte[] wav) throws IOException {
-        if (wav.length < 44 || wav[0] != 'R' || wav[1] != 'I'
-                || wav[2] != 'F' || wav[3] != 'F') {
-            throw new IOException("语音合成结果不是有效的 WAV 音频");
-        }
-        int offset = 12;
-        while (offset + 8 <= wav.length) {
-            String chunkId = new String(wav, offset, 4, StandardCharsets.US_ASCII);
-            int chunkLength = ByteBuffer.wrap(wav, offset + 4, 4)
-                    .order(ByteOrder.LITTLE_ENDIAN)
-                    .getInt();
-            if (chunkLength < 0) {
-                throw new IOException("WAV 子块长度无效");
-            }
-            long chunkEnd = (long) offset + 8 + chunkLength;
-            if ("data".equals(chunkId) && chunkEnd <= wav.length) {
-                return Arrays.copyOfRange(wav, offset + 8, (int) chunkEnd);
-            }
-            long nextOffset = chunkEnd + (chunkLength & 1);
-            if (nextOffset > wav.length || nextOffset > Integer.MAX_VALUE) {
-                break;
-            }
-            offset = (int) nextOffset;
-        }
-        throw new IOException("WAV 中找不到 PCM data 块");
-    }
 }
