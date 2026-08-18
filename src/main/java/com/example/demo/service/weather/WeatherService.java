@@ -6,11 +6,14 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import java.net.URI;
 import java.time.OffsetDateTime;
+import java.util.LinkedHashSet;
+import java.util.Set;
 
 @Service
 public class WeatherService {
@@ -32,9 +35,23 @@ public class WeatherService {
             throw new IllegalArgumentException("请告诉我要查询哪个城市，例如：北京天气怎么样");
         }
 
+        HttpClientErrorException.NotFound lastNotFound = null;
+        for (String candidate : locationCandidates(location)) {
+            try {
+                return requestCurrentWeather(candidate);
+            } catch (HttpClientErrorException.NotFound exception) {
+                lastNotFound = exception;
+            }
+        }
+        throw new IllegalArgumentException(
+                "找不到地点“" + location + "”，请只输入具体城市或区县，例如：张家港天气怎么样。",
+                lastNotFound);
+    }
+
+    private WeatherInfo requestCurrentWeather(String location) {
         URI uri = UriComponentsBuilder.fromUriString(config.getApiUrl())
                 .queryParam("key", config.getApiKey())
-                .queryParam("location", location.trim())
+                .queryParam("location", location)
                 .queryParam("language", "zh-Hans")
                 .queryParam("unit", "c")
                 .build()
@@ -60,6 +77,37 @@ public class WeatherService {
             throw exception;
         } catch (Exception exception) {
             throw new IllegalStateException("无法解析心知天气响应", exception);
+        }
+    }
+
+    private Set<String> locationCandidates(String location) {
+        String normalized = location.replaceAll("\\s+", "")
+                .replaceFirst("^中国", "")
+                .replaceAll("(天气|气温|温度)$", "");
+        LinkedHashSet<String> candidates = new LinkedHashSet<>();
+        candidates.add(normalized);
+
+        String[] administrativeParts = normalized.split("[省市州]");
+        if (administrativeParts.length > 1) {
+            String lastPart = administrativeParts[administrativeParts.length - 1]
+                    .replaceFirst("[市区县]$", "");
+            if (StringUtils.hasText(lastPart)) {
+                candidates.add(lastPart);
+            }
+        }
+
+        String withoutSuffix = normalized.replaceFirst("[市区县]$", "");
+        candidates.add(withoutSuffix);
+        addSuffixCandidate(candidates, withoutSuffix, 3);
+        addSuffixCandidate(candidates, withoutSuffix, 2);
+        addSuffixCandidate(candidates, withoutSuffix, 4);
+        candidates.removeIf(value -> !StringUtils.hasText(value));
+        return candidates;
+    }
+
+    private void addSuffixCandidate(Set<String> candidates, String location, int length) {
+        if (location.length() > length) {
+            candidates.add(location.substring(location.length() - length));
         }
     }
 }

@@ -45,7 +45,9 @@ public class AlibabaAiService {
                 action只能是CHAT、IMAGE_GENERATION、WEATHER。
                 replyMode只能是TEXT、VOICE。
                 用户要求画图、生成图片时使用IMAGE_GENERATION，并把绘图描述放入content。
-                用户询问天气、温度、是否下雨时使用WEATHER，并把城市或地区放入location。
+                用户询问天气、温度、是否下雨时使用WEATHER，并把最具体、可独立查询的城市、区县名称放入location。
+                不要把上级城市和下级城市连在一起，例如“苏州张家港”应返回“张家港”，
+                “江苏省苏州市张家港市”也应返回“张家港”，“上海浦东新区”应返回“浦东新区”。
                 其他情况使用CHAT，并把真正的问题放入content。
                 用户明确要求语音、朗读、说出来时replyMode为VOICE；明确要求文字时为TEXT；
                 没有明确要求时replyMode使用%s。
