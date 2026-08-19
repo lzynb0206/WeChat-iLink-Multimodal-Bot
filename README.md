@@ -18,11 +18,16 @@ src/main/java/com/example/demo
 │   ├── IntentResult.java
 │   ├── ReplyMode.java
 │   └── WeatherInfo.java
-└── service
+├── service
     ├── ai/AlibabaAiService.java
     ├── audio/AudioTranscoder.java
     ├── weather/WeatherService.java
     └── wechat/WechatBotService.java
+└── tool
+    ├── BotTool.java
+    ├── ToolRegistry.java
+    ├── WeatherTool.java
+    └── CalculatorTool.java
 ```
 
 ## 模型和 API
@@ -69,6 +74,7 @@ weather:
 - `生成一张雨中的杭州西湖`：生成并返回图片。
 - `杭州今天天气怎么样`：查询心知天气并返回文字。
 - `用语音告诉我上海天气`：查询天气并返回 WAV 音频文件。
+- `计算 123.45 × 67.89`：通过计算器工具返回精确结果。
 - 直接发送图片：使用千问视觉模型理解图片。
 
 ## 语音编解码
@@ -100,7 +106,7 @@ weather:
 
 1. 使用微信 iLink SDK 登录并持续接收消息。
 2. 判断用户希望聊天、生成图片、查询天气还是获得音频回复。
-3. 根据意图调用对应的阿里云模型或天气接口。
+3. 通过 Function Calling 让模型选择并调用天气、计算器等本地工具。
 4. 处理微信格式与模型接口格式之间的差异。
 5. 把文字、图片或 WAV 文件重新发送给微信用户。
 
@@ -119,9 +125,9 @@ WechatBotService ────── 图片消息 ──────► qwen3-vl-
    │
    ├── 文本/ASR结果 ──► qwen-flash 意图识别
    │                         │
-   │                         ├── CHAT ──► qwen-flash
+   │                         ├── CHAT ──► qwen-flash + Function Calling
    │                         ├── IMAGE_GENERATION ──► qwen-image-2.0
-   │                         └── WEATHER ──► 心知天气 API
+   │                         └── WEATHER ──► WeatherTool ──► 心知天气 API
    │
    └── replyMode=VOICE ──► CosyVoice ──► WAV 文件 ──► 微信
 ```
@@ -134,6 +140,10 @@ WechatBotService ────── 图片消息 ──────► qwen3-vl-
 | `AlibabaAiService` | 聊天、意图识别、图片理解、生图、ASR、TTS |
 | `AudioTranscoder` | 微信 SILK 与标准 WAV 之间的入站转换 |
 | `WeatherService` | 构造天气请求、解析结果、地点失败重试 |
+| `BotTool` | 规定工具名称、说明、JSON Schema 和执行方法 |
+| `ToolRegistry` | 自动收集 Spring 工具、输出工具定义并按名称执行 |
+| `WeatherTool` | 把天气服务封装成模型可调用的函数工具 |
+| `CalculatorTool` | 使用 `BigDecimal` 执行精确加减乘除 |
 | `AiConfig` | 管理百炼地址、API Key 和模型名称 |
 | `WeatherConfig` | 管理心知天气地址和 API Key |
 | `IntentResult` | 保存动作、回复形式、有效内容和地点 |
@@ -150,7 +160,7 @@ WechatBotService ────── 图片消息 ──────► qwen3-vl-
 
 ### 2. 构造器依赖注入
 
-业务类通过构造器接收其他服务，例如 `WechatBotService` 接收 AI、音频和天气服务。这样依赖关系是明确的，字段也可以声明为 `final`，更方便测试和维护。
+业务类通过构造器接收其他服务，例如 `WechatBotService` 接收 AI 和音频服务，`WeatherTool` 接收天气服务。这样依赖关系是明确的，字段也可以声明为 `final`，更方便测试和维护。
 
 ### 3. REST API 调用
 
@@ -177,7 +187,6 @@ Base64 的代价是数据体积通常增加约三分之一，因此还要关注�
 ### 5. PCM、WAV、MP3 与 SILK
 
 | 格式 | 特点 | 本项目用途 |
-| --- | --- | --- |
 | PCM | 未压缩的原始采样数据，没有通用文件头 | SILK 编解码器的中间数据 |
 | WAV | 通常是 WAV 文件头加 PCM，兼容性好、体积较大 | 发送给 ASR、接收 TTS 结果、作为微信文件回复 |
 | MP3 | 有损压缩、文件较小 | 当前未使用，可作为以后节省流量的方案 |
@@ -219,6 +228,70 @@ WAV 文件头会记录采样率、声道、位深以及数据长度。本项目�
 - `location` 是天气接口使用的地点。
 
 动作和回复形式分开后，“用语音告诉我上海天气”才能同时表达天气查询和音频回复两个维度。模型调用失败时，项目还有本地关键词规则兜底。
+
+### 8. Function Calling / Tool Use
+
+大模型只能生成文字，本身不能直接执行 Java 方法、访问数据库或获得实时天气。Function Calling 的作用是让模型根据工具说明生成“要调用哪个函数、传什么参数”的结构化指令，真正的函数仍由 Java 程序执行。
+
+本项目采用以下工作流程：
+
+```text
+1. 用户：张家港天气怎么样？
+2. Java：把用户问题和 tools 工具清单发给 qwen-flash
+3. 模型：返回 get_current_weather 和 {"location":"张家港"}
+4. Java：ToolRegistry 找到 WeatherTool 并执行
+5. WeatherTool：调用 WeatherService，得到实时天气
+6. Java：把工具结果以 role=tool 放回 messages
+7. 模型：根据真实工具结果组织中文答案
+8. Bot：把最终答案发送给微信用户
+```
+
+模型只负责选择工具和生成参数，`ToolRegistry` 才是工具执行者。程序最多允许 4 轮工具调用，防止模型反复请求工具形成无限循环。`tool_choice` 使用 `auto`，因此普通聊天不强制调用工具；天气和精确计算则由模型主动选择工具。
+
+### 9. 使用 JSON Schema 描述函数签名
+
+Function Calling 不能直接读取 Java 方法签名，所以需要用 JSON Schema 告诉模型函数接受哪些参数。
+
+天气工具的 Schema：
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "location": {
+      "type": "string",
+      "description": "最具体、可独立查询的城市或区县名"
+    }
+  },
+  "required": ["location"],
+  "additionalProperties": false
+}
+```
+
+常用字段：
+
+| 字段 | 作用 |
+| --- | --- |
+| `type` | 数据类型，例如 `object`、`string`、`number`、`integer`、`array`、`boolean` |
+| `properties` | 声明对象允许包含的字段及每个字段的 Schema |
+| `description` | 向模型说明字段含义，会影响模型如何选择和填写参数 |
+| `required` | 必填字段数组；写在 `properties` 中并不代表字段自动必填 |
+| `enum` | 把值限制在固定集合，例如 `add/subtract/multiply/divide` |
+| `additionalProperties` | 设置为 `false` 时不允许模型生成未声明的额外字段 |
+
+计算器工具要求 `operation`、`left`、`right` 三个参数。`operation` 使用 `enum` 限制运算类型，两个操作数使用 `number`。即使模型生成了参数，工具执行前仍需在 Java 中校验，因为 Schema 能约束模型输出，但不能代替服务端安全校验。
+
+### 10. 自定义工具的扩展方式
+
+新增工具只需：
+
+1. 新建类并实现 `BotTool`。
+2. 使用 `@Component` 注册为 Spring Bean。
+3. 提供唯一的英文工具名和清晰描述。
+4. 返回合法的参数 JSON Schema。
+5. 在 `execute` 中校验参数并执行真实业务。
+
+`ToolRegistry` 会通过构造器自动收集所有 `BotTool`，不需要每新增一个工具就修改大量 `if/else`。如果工具名重复，项目会在启动阶段直接报错，避免运行时调用错工具。
 
 ## 真实问题与解决方案
 
@@ -393,6 +466,24 @@ Java 文件已经移动到新的包目录，但测试出现重复 Bean 定义。
 
 日志面向开发者，应保留堆栈；用户提示面向用户，应准确但不能泄露 API Key、请求体等敏感信息。
 
+### 问题八：模型选择了工具，但程序仍然拿不到最终答案
+
+**现象**
+
+第一次请求加入 `tools` 后，模型返回的是 `tool_calls`，其中只有工具名称和 JSON 参数，没有适合直接发给用户的最终天气回答。
+
+**根因**
+
+Function Calling 不是一次请求完成所有事情。模型不会执行 Java 工具，也不知道工具运行后的结果。程序必须执行工具并发起下一次模型调用。
+
+**解决方案**
+
+程序把模型返回的 assistant 工具调用消息保留在 `messages`，执行 `ToolRegistry` 对应工具，然后增加一条包含相同 `tool_call_id` 的 `role=tool` 消息，再次请求模型。模型看到真实工具结果后才生成最终答案。
+
+**经验总结**
+
+实现工具调用时不能只解析函数名，还必须维护完整消息链和 `tool_call_id`。工具参数来自模型，执行前必须进行类型、必填项和业务范围校验。
+
 ## 问题排查方法
 
 遇到故障时可以按以下顺序处理：
@@ -422,6 +513,7 @@ Java 文件已经移动到新的包目录，但测试出现重复 Bean 定义。
 - [ ] “生成一张……”可以收到图片。
 - [ ] 直接发送图片可以收到图片描述。
 - [ ] “张家港天气怎么样”可以返回实况天气。
+- [ ] “计算 123.45 × 67.89”可以通过计算器工具返回结果。
 - [ ] “用语音告诉我上海天气”可以返回天气 WAV 文件。
 - [ ] API Key 缺失时提示明确且日志中不泄露 Key。
 - [ ] 应用关闭后微信客户端和线程能够释放。
@@ -436,6 +528,7 @@ Java 文件已经移动到新的包目录，但测试出现重复 Bean 定义。
 6. 当前内置 SILK 编解码器只支持 Apple Silicon Mac，部署到 Linux 时需要准备对应二进制文件。
 7. 目前测试主要验证 Spring 容器启动，后续应使用 Mock 服务增加意图、天气解析和异常分支单元测试。
 8. 第三方 API 有价格、限流和模型下线风险，生产环境应增加用量监控和降级策略。
+9. 当前 Function Calling 顺序执行工具；互不依赖的多个工具后续可考虑并行执行。
 
 ## 面试快速复习
 
@@ -465,6 +558,10 @@ Java 文件已经移动到新的包目录，但测试出现重复 Bean 定义。
 
 真实 Key 只放环境变量或被 `.gitignore` 排除的 `application-local.yml`，公开配置中只保留变量引用。日志和异常提示不打印 Key。
 
+**Function Calling 是模型在执行 Java 方法吗？**
+
+不是。模型只根据工具描述返回工具名称和 JSON 参数，Java 程序通过注册表找到并执行工具，再把执行结果交回模型生成最终回答。这样模型负责理解和规划，应用负责真实执行与安全校验。
+
 **如果要支持更多并发，你会怎么改？**
 
 把 SDK 回调中的耗时业务提交到有界线程池或消息队列；为每个外部请求设置超时、重试和熔断；按用户维护上下文顺序；对天气城市 ID 等稳定数据增加缓存。
@@ -487,3 +584,12 @@ Java 文件已经移动到新的包目录，但测试出现重复 Bean 定义。
 - 接入心知天气实况 API。
 - 修复复合行政区名称导致的 `AP010010` 地点查询失败。
 - 完成项目知识文档、问题复盘和面试速查内容。
+
+### 2026-08-19
+
+- 学习 Function Calling / Tool Use 的概念和标准调用流程。
+- 学习使用 JSON Schema 描述工具名称、参数类型、必填字段和枚举约束。
+- 设计统一的 `BotTool` 接口和自动收集工具的 `ToolRegistry`。
+- 将心知天气封装为 `get_current_weather` 工具。
+- 实现基于 `BigDecimal` 的 `calculate` 精确计算工具。
+- 打通“模型选择工具 → Java 执行 → 工具结果回传 → 模型生成最终回答”的完整微信链路。

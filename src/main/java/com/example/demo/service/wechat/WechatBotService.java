@@ -5,7 +5,6 @@ import com.example.demo.model.IntentResult;
 import com.example.demo.model.ReplyMode;
 import com.example.demo.service.ai.AlibabaAiService;
 import com.example.demo.service.audio.AudioTranscoder;
-import com.example.demo.service.weather.WeatherService;
 import com.github.wechat.ilink.sdk.ILinkClient;
 import com.github.wechat.ilink.sdk.core.listener.OnLoginListener;
 import com.github.wechat.ilink.sdk.core.listener.OnMessageListener;
@@ -34,7 +33,6 @@ import java.util.concurrent.Executors;
 public class WechatBotService implements DisposableBean {
     private final AlibabaAiService aiService;
     private final AudioTranscoder audioTranscoder;
-    private final WeatherService weatherService;
     private ILinkClient client;
     private ExecutorService botExecutor;
 
@@ -49,11 +47,9 @@ public class WechatBotService implements DisposableBean {
 
     public WechatBotService(
             AlibabaAiService aiService,
-            AudioTranscoder audioTranscoder,
-            WeatherService weatherService) {
+            AudioTranscoder audioTranscoder) {
         this.aiService = aiService;
         this.audioTranscoder = audioTranscoder;
-        this.weatherService = weatherService;
     }
 
     @EventListener(ApplicationReadyEvent.class)
@@ -175,9 +171,10 @@ public class WechatBotService implements DisposableBean {
             return;
         }
 
-        String reply = intent.action() == ActionType.WEATHER
-                ? weatherService.getCurrentWeather(intent.location()).toReplyText()
-                : aiService.chat(intent.content());
+        String prompt = intent.action() == ActionType.WEATHER
+                ? "请查询“" + intent.location() + "”的当前天气。用户原始问题：" + intent.content()
+                : intent.content();
+        String reply = aiService.chatWithTools(prompt);
         sendReply(fromUserId, reply, intent.replyMode());
     }
 
