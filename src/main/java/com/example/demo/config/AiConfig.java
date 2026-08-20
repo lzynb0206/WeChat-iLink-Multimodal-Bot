@@ -13,10 +13,11 @@ public class AiConfig {
     private String apiUrl = "https://dashscope.aliyuncs.com/api/v1";
     private String chatModel = "qwen-flash";
     private String intentModel = "qwen-flash";
+    private String searchModel = "qwen-plus";
+    private String translationModel = "qwen-mt-flash";
     private String visionModel = "qwen3-vl-flash";
     private String imageModel = "qwen-image-2.0";
     private String asrModel = "qwen3-asr-flash";
     private String ttsModel = "cosyvoice-v3-flash";
     private String ttsVoice = "longanyang";
-    private String silkCodecPath = "tools/macos-arm64/silk_codec";
 }

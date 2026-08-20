@@ -1,73 +1,79 @@
 package com.example.demo.service.audio;
 
-import com.example.demo.config.AiConfig;
+import com.example.demo.config.AudioConfig;
 import org.springframework.stereotype.Component;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.TimeUnit;
 
 @Component
 public class AudioTranscoder {
-    public static final int SAMPLE_RATE = 24_000;
-    private final AiConfig config;
+    private final AudioConfig config;
 
-    public AudioTranscoder(AiConfig config) {
+    public AudioTranscoder(AudioConfig config) {
         this.config = config;
     }
 
     public byte[] silkToWav(byte[] silk) throws IOException, InterruptedException {
-        Path silkFile = Files.createTempFile("wechat-voice-", ".silk");
-        Path pcmFile = Files.createTempFile("wechat-voice-", ".pcm");
-        try {
-            Files.write(silkFile, silk);
-            runCodec("decode", silkFile, pcmFile);
-            return pcmToWav(Files.readAllBytes(pcmFile));
-        } finally {
-            Files.deleteIfExists(silkFile);
-            Files.deleteIfExists(pcmFile);
+        if (silk == null || silk.length == 0) {
+            throw new IllegalArgumentException("SILK 语音内容为空");
         }
-    }
+        Path script = Path.of(config.getSilkDecoderScript()).toAbsolutePath().normalize();
+        if (!Files.isRegularFile(script)) {
+            throw new IOException("npm SILK 解码脚本不存在：" + script);
+        }
 
-    private void runCodec(String operation, Path input, Path output)
-            throws IOException, InterruptedException {
-        Path codec = Path.of(config.getSilkCodecPath()).toAbsolutePath().normalize();
-        if (!Files.isExecutable(codec)) {
-            throw new IOException("SILK 编解码器不存在或不可执行：" + codec);
-        }
         Process process = new ProcessBuilder(
-                codec.toString(), operation, input.toString(), output.toString())
-                .redirectErrorStream(true)
+                config.getNodeExecutable(),
+                script.toString(),
+                String.valueOf(config.getSampleRate()))
                 .start();
-        String processLog = new String(
-                process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-        if (process.waitFor() != 0) {
-            throw new IOException("SILK 转码失败：" + processLog);
+        CompletableFuture<byte[]> wavFuture = readBytes(process.getInputStream());
+        CompletableFuture<byte[]> errorFuture = readBytes(process.getErrorStream());
+        try (var input = process.getOutputStream()) {
+            input.write(silk);
+        }
+
+        if (!process.waitFor(config.getDecodeTimeoutSeconds(), TimeUnit.SECONDS)) {
+            process.destroyForcibly();
+            throw new IOException("npm SILK 解码超时");
+        }
+        byte[] wav = await(wavFuture);
+        String error = new String(await(errorFuture), StandardCharsets.UTF_8).trim();
+        if (process.exitValue() != 0) {
+            throw new IOException("npm SILK 解码失败：" + error);
+        }
+        if (wav.length < 44 || !"RIFF".equals(
+                new String(wav, 0, 4, StandardCharsets.US_ASCII))) {
+            throw new IOException("npm SILK 解码器未返回有效 WAV 数据");
+        }
+        return wav;
+    }
+
+    private CompletableFuture<byte[]> readBytes(java.io.InputStream stream) {
+        return CompletableFuture.supplyAsync(() -> {
+            try (stream) {
+                return stream.readAllBytes();
+            } catch (IOException exception) {
+                throw new CompletionException(exception);
+            }
+        });
+    }
+
+    private byte[] await(CompletableFuture<byte[]> future) throws IOException {
+        try {
+            return future.join();
+        } catch (CompletionException exception) {
+            Throwable cause = exception.getCause();
+            if (cause instanceof IOException ioException) {
+                throw ioException;
+            }
+            throw new IOException("读取 npm SILK 解码结果失败", cause);
         }
     }
-
-    private byte[] pcmToWav(byte[] pcm) throws IOException {
-        ByteArrayOutputStream output = new ByteArrayOutputStream(44 + pcm.length);
-        ByteBuffer header = ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN);
-        header.put("RIFF".getBytes(StandardCharsets.US_ASCII));
-        header.putInt(36 + pcm.length);
-        header.put("WAVEfmt ".getBytes(StandardCharsets.US_ASCII));
-        header.putInt(16);
-        header.putShort((short) 1);
-        header.putShort((short) 1);
-        header.putInt(SAMPLE_RATE);
-        header.putInt(SAMPLE_RATE * 2);
-        header.putShort((short) 2);
-        header.putShort((short) 16);
-        header.put("data".getBytes(StandardCharsets.US_ASCII));
-        header.putInt(pcm.length);
-        output.write(header.array());
-        output.write(pcm);
-        return output.toByteArray();
-    }
-
 }

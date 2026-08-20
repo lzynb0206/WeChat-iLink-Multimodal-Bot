@@ -39,3 +39,4 @@ build/
 .env
 downloads/
 wechat-login-qr.png
+node_modules/
