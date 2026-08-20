@@ -8,9 +8,6 @@ logging:
   level:
     root: INFO
 
-project:
-  version: 1.1.0
-
 wechat:
   bot:
     enabled: ${WECHAT_BOT_ENABLED:true}

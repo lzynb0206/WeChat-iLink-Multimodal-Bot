@@ -10,25 +10,26 @@ src/main/java/com/example/demo
 ├── config
 │   ├── AiConfig.java
 │   └── WeatherConfig.java
-├── controller
-│   ├── CmdController.java
-│   └── HelloController.java
 ├── model
 │   ├── ActionType.java
 │   ├── IntentResult.java
 │   ├── ReplyMode.java
 │   └── WeatherInfo.java
 ├── service
-    ├── ai/AlibabaAiService.java
-    ├── audio/AudioTranscoder.java
-    ├── weather/WeatherService.java
-    └── wechat/WechatBotService.java
+│   ├── ai/AlibabaAiService.java
+│   ├── audio/AudioTranscoder.java
+│   ├── weather/WeatherService.java
+│   └── wechat/WechatBotService.java
 └── tool
     ├── BotTool.java
     ├── ToolRegistry.java
+    ├── ToolCallingEngine.java
     ├── WeatherTool.java
-    └── CalculatorTool.java
+    ├── CalculatorTool.java
+    └── TemperatureConverterTool.java
 ```
+
+项目恢复为更直观的简洁结构：`config` 管理配置，`model` 保存数据对象，`service` 按 AI、音频、天气和微信划分业务能力，`tool` 集中保存 Function Calling 框架与具体工具。项目通过微信 iLink SDK 收发消息，不保留无关的 HTTP 控制器。
 
 ## 模型和 API
 
@@ -75,6 +76,7 @@ weather:
 - `杭州今天天气怎么样`：查询心知天气并返回文字。
 - `用语音告诉我上海天气`：查询天气并返回 WAV 音频文件。
 - `计算 123.45 × 67.89`：通过计算器工具返回精确结果。
+- `查询张家港天气，并把温度换算成华氏度`：依次调用天气和温度换算工具。
 - 直接发送图片：使用千问视觉模型理解图片。
 
 ## 语音编解码
@@ -134,6 +136,13 @@ WechatBotService ────── 图片消息 ──────► qwen3-vl-
 
 ### 各层职责
 
+| 包 | 职责 | 新代码示例 |
+| --- | --- | --- |
+| `config` | 集中绑定地址、模型名、开关和 API Key | 新第三方服务配置 |
+| `model` | 保存意图、回复方式和天气等数据对象 | 新的消息或查询结果对象 |
+| `service` | 实现微信消息处理、AI、天气和音频业务 | 新模型能力或外部 API 服务 |
+| `tool` | 保存工具接口、调用引擎及具体业务工具 | 快递查询、汇率换算工具 |
+
 | 类 | 职责 |
 | --- | --- |
 | `WechatBotService` | 微信登录、监听消息、分发任务、发送结果 |
@@ -142,8 +151,10 @@ WechatBotService ────── 图片消息 ──────► qwen3-vl-
 | `WeatherService` | 构造天气请求、解析结果、地点失败重试 |
 | `BotTool` | 规定工具名称、说明、JSON Schema 和执行方法 |
 | `ToolRegistry` | 自动收集 Spring 工具、输出工具定义并按名称执行 |
-| `WeatherTool` | 把天气服务封装成模型可调用的函数工具 |
+| `ToolCallingEngine` | 维护模型、工具、模型之间的多轮消息链并限制最大调用轮数 |
+| `WeatherTool` | 查询天气并返回可供后续工具使用的结构化 JSON |
 | `CalculatorTool` | 使用 `BigDecimal` 执行精确加减乘除 |
+| `TemperatureConverterTool` | 在摄氏度、华氏度和开尔文之间精确换算并校验绝对零度 |
 | `AiConfig` | 管理百炼地址、API Key 和模型名称 |
 | `WeatherConfig` | 管理心知天气地址和 API Key |
 | `IntentResult` | 保存动作、回复形式、有效内容和地点 |
@@ -246,9 +257,30 @@ WAV 文件头会记录采样率、声道、位深以及数据长度。本项目�
 8. Bot：把最终答案发送给微信用户
 ```
 
-模型只负责选择工具和生成参数，`ToolRegistry` 才是工具执行者。程序最多允许 4 轮工具调用，防止模型反复请求工具形成无限循环。`tool_choice` 使用 `auto`，因此普通聊天不强制调用工具；天气和精确计算则由模型主动选择工具。
+模型只负责选择工具和生成参数，`ToolRegistry` 才是工具执行者，`ToolCallingEngine` 负责维护完整消息链。程序最多允许 6 轮模型调用，防止模型反复请求工具形成无限循环。`tool_choice` 使用 `auto`，因此普通聊天不强制调用工具；天气、精确计算和温度换算由模型按需选择。
 
-### 9. 使用 JSON Schema 描述函数签名
+### 9. 多步链式工具调用
+
+多步调用的关键不是连续执行两个固定方法，而是第二步参数必须来自第一步的真实执行结果。本项目支持下面的调用链：
+
+```text
+用户：查询张家港天气，并把温度换算成华氏度
+  ↓
+模型调用 get_current_weather(location="张家港")
+  ↓
+WeatherTool 返回 {"temperature_celsius":20,...}
+  ↓
+模型读取上一步结果并调用
+convert_temperature(value=20, from_unit="C", to_unit="F")
+  ↓
+工具返回 {"value":68,"unit":"F"}
+  ↓
+模型结合两次真实结果生成最终回答
+```
+
+天气工具返回 JSON 而不是已经排版好的句子，是为了让后续工具能稳定读取 `temperature_celsius`。链路测试使用固定天气工具模拟第一步，并明确断言第二步收到的 `value` 等于第一步返回的 20，而不是测试代码预先写死的另一个值。
+
+### 10. 使用 JSON Schema 描述函数签名
 
 Function Calling 不能直接读取 Java 方法签名，所以需要用 JSON Schema 告诉模型函数接受哪些参数。
 
@@ -281,7 +313,7 @@ Function Calling 不能直接读取 Java 方法签名，所以需要用 JSON Sch
 
 计算器工具要求 `operation`、`left`、`right` 三个参数。`operation` 使用 `enum` 限制运算类型，两个操作数使用 `number`。即使模型生成了参数，工具执行前仍需在 Java 中校验，因为 Schema 能约束模型输出，但不能代替服务端安全校验。
 
-### 10. 自定义工具的扩展方式
+### 11. 自定义工具的扩展方式
 
 新增工具只需：
 
@@ -514,6 +546,7 @@ Function Calling 不是一次请求完成所有事情。模型不会执行 Java 
 - [ ] 直接发送图片可以收到图片描述。
 - [ ] “张家港天气怎么样”可以返回实况天气。
 - [ ] “计算 123.45 × 67.89”可以通过计算器工具返回结果。
+- [ ] “查询张家港天气并换算成华氏度”可以完成天气 → 温度换算链式调用。
 - [ ] “用语音告诉我上海天气”可以返回天气 WAV 文件。
 - [ ] API Key 缺失时提示明确且日志中不泄露 Key。
 - [ ] 应用关闭后微信客户端和线程能够释放。
@@ -526,7 +559,7 @@ Function Calling 不是一次请求完成所有事情。模型不会执行 Java 
 4. 地点纠错使用模型提取和字符串候选，未来可以先调用标准城市搜索接口并缓存城市 ID。
 5. 图片会保存到 `downloads`，生产环境应增加定期清理策略或改为对象存储。
 6. 当前内置 SILK 编解码器只支持 Apple Silicon Mac，部署到 Linux 时需要准备对应二进制文件。
-7. 目前测试主要验证 Spring 容器启动，后续应使用 Mock 服务增加意图、天气解析和异常分支单元测试。
+7. 工具模块已覆盖计算、温度换算和两步链式调用测试，后续还应增加 AI HTTP 接口和微信消息发送的 Mock 集成测试。
 8. 第三方 API 有价格、限流和模型下线风险，生产环境应增加用量监控和降级策略。
 9. 当前 Function Calling 顺序执行工具；互不依赖的多个工具后续可考虑并行执行。
 
@@ -593,3 +626,15 @@ Function Calling 不是一次请求完成所有事情。模型不会执行 Java 
 - 将心知天气封装为 `get_current_weather` 工具。
 - 实现基于 `BigDecimal` 的 `calculate` 精确计算工具。
 - 打通“模型选择工具 → Java 执行 → 工具结果回传 → 模型生成最终回答”的完整微信链路。
+
+### 2026-08-20
+
+- 新增 `convert_temperature` 工具，支持摄氏度、华氏度和开尔文相互换算。
+- 为温度换算加入单位枚举、数值类型和绝对零度校验，为计算器加入超大数范围限制。
+- 加强 `ToolRegistry` 对重复工具名、非法名称、空描述、错误 Schema 和超长参数的校验。
+- 将工具循环从 AI HTTP 服务中提取为独立的 `ToolCallingEngine`，便于复用和单元测试。
+- 将天气结果改为结构化 JSON，打通“查询天气 → 读取实际温度 → 换算华氏度 → 生成回答”的两步依赖链。
+- 增加温度换算和链式工具调用测试，覆盖正常换算、绝对零度异常和前后步骤数据依赖。
+- 将项目包结构整理为直观的 `config/model/service/tool`，方便按功能快速定位代码。
+- 删除与微信机器人无关的演示、版本、运行状态 HTTP 控制器及其配置。
+- 移除 Web MVC 服务器依赖，只保留调用第三方 HTTP API 所需的 `spring-web`。

@@ -11,6 +11,7 @@ import java.util.Map;
 @Component
 public class CalculatorTool implements BotTool {
     private static final MathContext MATH_CONTEXT = MathContext.DECIMAL128;
+    private static final BigDecimal MAX_ABSOLUTE_VALUE = new BigDecimal("1E100");
 
     @Override
     public String name() {
@@ -53,6 +54,8 @@ public class CalculatorTool implements BotTool {
         String operation = arguments.path("operation").asText();
         BigDecimal left = arguments.path("left").decimalValue();
         BigDecimal right = arguments.path("right").decimalValue();
+        requireSupportedRange(left, "left");
+        requireSupportedRange(right, "right");
         BigDecimal result = switch (operation) {
             case "add" -> left.add(right, MATH_CONTEXT);
             case "subtract" -> left.subtract(right, MATH_CONTEXT);
@@ -73,6 +76,12 @@ public class CalculatorTool implements BotTool {
     private void requireNumber(JsonNode arguments, String field) {
         if (!arguments.has(field) || !arguments.path(field).isNumber()) {
             throw new IllegalArgumentException("计算工具缺少数字参数：" + field);
+        }
+    }
+
+    private void requireSupportedRange(BigDecimal value, String field) {
+        if (value.abs().compareTo(MAX_ABSOLUTE_VALUE) > 0) {
+            throw new IllegalArgumentException("计算参数超出范围：" + field);
         }
     }
 }

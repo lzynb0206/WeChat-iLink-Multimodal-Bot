@@ -4,8 +4,7 @@ import com.example.demo.config.AiConfig;
 import com.example.demo.model.ActionType;
 import com.example.demo.model.IntentResult;
 import com.example.demo.model.ReplyMode;
-import com.example.demo.tool.ToolRegistry;
-import com.fasterxml.jackson.core.type.TypeReference;
+import com.example.demo.tool.ToolCallingEngine;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -18,7 +17,6 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestTemplate;
 
 import java.net.URI;
-import java.util.ArrayList;
 import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -28,15 +26,14 @@ import java.util.Map;
 @Slf4j
 @Service
 public class AlibabaAiService {
-    private static final int MAX_TOOL_ROUNDS = 4;
     private final AiConfig config;
-    private final ToolRegistry toolRegistry;
+    private final ToolCallingEngine toolCallingEngine;
     private final ObjectMapper objectMapper;
     private final RestTemplate restTemplate;
 
-    public AlibabaAiService(AiConfig config, ToolRegistry toolRegistry) {
+    public AlibabaAiService(AiConfig config, ToolCallingEngine toolCallingEngine) {
         this.config = config;
-        this.toolRegistry = toolRegistry;
+        this.toolCallingEngine = toolCallingEngine;
         this.objectMapper = new ObjectMapper();
         this.restTemplate = new RestTemplate();
     }
@@ -89,62 +86,34 @@ public class AlibabaAiService {
 
     public String chatWithTools(String userPrompt) {
         requireApiKey();
-        List<Map<String, Object>> messages = new ArrayList<>();
-        messages.add(Map.of(
-                "role", "system",
-                "content", "你是微信助手。需要实时天气或精确计算时必须使用提供的工具；请用中文简洁回答。"
-        ));
-        messages.add(Map.of("role", "user", "content", userPrompt));
-
-        for (int round = 0; round < MAX_TOOL_ROUNDS; round++) {
+        List<Map<String, Object>> messages = List.of(
+                Map.of(
+                        "role", "system",
+                        "content", """
+                                你是微信助手。需要实时天气、精确计算或温度换算时必须使用提供的工具。
+                                多步任务必须一次执行一个工具，后一步参数必须使用前一步工具返回的真实结果，不能猜测。
+                                例如用户要求查询天气并换算华氏度时，先调用天气工具，再使用其temperature_celsius调用温度换算工具。
+                                最终请用中文简洁回答并说明数据来源。
+                                """
+                ),
+                Map.of("role", "user", "content", userPrompt)
+        );
+        return toolCallingEngine.run(messages, currentMessages -> {
             Map<String, Object> body = new LinkedHashMap<>();
             body.put("model", config.getChatModel());
-            body.put("messages", messages);
-            body.put("tools", toolRegistry.definitions());
+            body.put("messages", currentMessages);
+            body.put("tools", toolCallingEngine.toolDefinitions());
             body.put("tool_choice", "auto");
             body.put("parallel_tool_calls", false);
             body.put("enable_thinking", false);
             body.put("temperature", 0.3);
-
             JsonNode root = postJson(config.getCompatibleApiUrl(), body);
             JsonNode message = root.at("/choices/0/message");
             if (message.isMissingNode()) {
                 throw new IllegalStateException("千问未返回消息：" + root);
             }
-
-            JsonNode toolCalls = message.path("tool_calls");
-            if (!toolCalls.isArray() || toolCalls.isEmpty()) {
-                String content = message.path("content").asText();
-                if (!StringUtils.hasText(content)) {
-                    throw new IllegalStateException("千问未返回最终回答：" + root);
-                }
-                return content.trim();
-            }
-
-            messages.add(toMap(message));
-            for (JsonNode toolCall : toolCalls) {
-                String toolCallId = toolCall.path("id").asText();
-                String toolName = toolCall.at("/function/name").asText();
-                JsonNode argumentsNode = toolCall.at("/function/arguments");
-                String arguments = argumentsNode.isTextual()
-                        ? argumentsNode.asText()
-                        : argumentsNode.toString();
-                String toolResult;
-                try {
-                    toolResult = toolRegistry.execute(toolName, arguments);
-                    log.info("工具执行成功 tool={}", toolName);
-                } catch (Exception exception) {
-                    toolResult = "工具执行失败：" + exception.getMessage();
-                    log.warn("工具执行失败 tool={}", toolName, exception);
-                }
-                messages.add(Map.of(
-                        "role", "tool",
-                        "tool_call_id", toolCallId,
-                        "content", toolResult
-                ));
-            }
-        }
-        throw new IllegalStateException("工具调用轮数超过限制");
+            return message;
+        });
     }
 
     public String understandImage(byte[] imageBytes, String mimeType) {
@@ -269,16 +238,6 @@ public class AlibabaAiService {
             return objectMapper.readTree(response.getBody());
         } catch (Exception exception) {
             throw new IllegalStateException("无法解析阿里云百炼响应", exception);
-        }
-    }
-
-    private Map<String, Object> toMap(JsonNode node) {
-        try {
-            return objectMapper.readValue(
-                    node.toString(), new TypeReference<Map<String, Object>>() {
-                    });
-        } catch (Exception exception) {
-            throw new IllegalStateException("无法保存工具调用消息", exception);
         }
     }
 

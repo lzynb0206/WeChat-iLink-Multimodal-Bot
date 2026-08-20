@@ -1,19 +1,25 @@
 package com.example.demo.tool;
 
+import com.example.demo.model.WeatherInfo;
 import com.example.demo.service.weather.WeatherService;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
+import java.math.BigDecimal;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 @Component
 public class WeatherTool implements BotTool {
     private final WeatherService weatherService;
+    private final ObjectMapper objectMapper;
 
     public WeatherTool(WeatherService weatherService) {
         this.weatherService = weatherService;
+        this.objectMapper = new ObjectMapper();
     }
 
     @Override
@@ -47,6 +53,19 @@ public class WeatherTool implements BotTool {
         if (!StringUtils.hasText(location)) {
             throw new IllegalArgumentException("天气工具缺少 location 参数");
         }
-        return weatherService.getCurrentWeather(location).toReplyText();
+        WeatherInfo weather = weatherService.getCurrentWeather(location);
+        try {
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("location", weather.location());
+            result.put("weather", weather.weather());
+            result.put("temperature_celsius", new BigDecimal(weather.temperature()));
+            result.put("last_update", weather.lastUpdate() == null ? "" : weather.lastUpdate().toString());
+            result.put("source", "心知天气");
+            return objectMapper.writeValueAsString(result);
+        } catch (NumberFormatException exception) {
+            throw new IllegalStateException("天气接口返回的温度不是有效数字", exception);
+        } catch (Exception exception) {
+            throw new IllegalStateException("无法生成天气工具结果", exception);
+        }
     }
 }
