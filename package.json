@@ -1,0 +1,14 @@
+{
+  "name": "wechat-ilink-multimodal-bot-audio",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "audio:check": "node scripts/audio-self-test.mjs"
+  },
+  "dependencies": {
+    "silk-wasm": "3.7.1"
+  }
+}
