@@ -207,7 +207,37 @@ weather:
   → qwen-flash 生成最终中文回答
 ```
 
-`ToolCallingEngine` 最多允许 6 轮模型调用，避免模型无限循环。工具名称、参数 JSON 长度、Schema 类型和重复注册都会在 Java 侧校验。
+`ToolCallingEngine` 最多允许 6 轮模型调用、每轮最多执行 8 个工具，避免模型无限循环或一次创建过多任务。工具名称、参数 JSON 长度、Schema 类型和重复注册都会在 Java 侧校验。
+
+### 多工具协作
+
+同一句话可以触发多个工具，执行方式由工具之间是否存在数据依赖决定：
+
+| 场景 | 调用方式 | 示例 |
+| --- | --- | --- |
+| 参数互不依赖 | 同一轮返回多个 `tool_calls`，使用 Java 21 虚拟线程并行执行 | 同时查询上海和杭州天气 |
+| 后一步依赖前一步结果 | 每轮只执行当前可运行的工具，把结果交回模型后再执行下一步 | 查询天气，再把实际温度换算成华氏度 |
+
+并行执行完成后，结果仍按照模型返回的 `tool_calls` 顺序加入消息，并通过各自的 `tool_call_id` 与调用一一对应。单个工具发生业务异常时会返回结构化错误结果，其他独立工具仍可正常完成。新增的 `BotTool` 应保持无共享可变状态，或者自行保证线程安全。
+
+```text
+用户：查询上海和杭州天气，同时计算 123.45 × 67.89
+  → 模型同一轮生成 3 个 tool_calls
+  → get_current_weather(上海) ┐
+  → get_current_weather(杭州) ├─ 并行执行
+  → calculate(...)            ┘
+  → 汇总 3 个真实结果后生成一次最终回答
+```
+
+存在依赖的调用继续使用多轮串行方式：
+
+```text
+查询张家港天气，并把温度换算成华氏度
+  → get_current_weather(location="张家港")
+  → 得到 temperature_celsius
+  → convert_temperature(value=实际温度, from_unit="C", to_unit="F")
+  → 生成最终回答
+```
 
 ### 已接入工具
 
@@ -218,16 +248,6 @@ weather:
 | `convert_temperature` | `TemperatureConverterTool` | 在摄氏度、华氏度、开尔文之间换算 |
 | `search_news` | `NewsTool` | 通过百炼联网搜索查询带来源链接的近期新闻 |
 | `translate_text` | `TranslationTool` | 使用 `qwen-mt-flash` 进行多语言文本翻译 |
-
-已验证的多步调用示例：
-
-```text
-查询张家港天气，并把温度换算成华氏度
-  → get_current_weather(location="张家港")
-  → 得到 temperature_celsius
-  → convert_temperature(value=实际温度, from_unit="C", to_unit="F")
-  → 生成最终回答
-```
 
 ### 工具扩展清单
 

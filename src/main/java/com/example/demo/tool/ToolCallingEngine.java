@@ -10,12 +10,17 @@ import org.springframework.util.StringUtils;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.function.Function;
 
 @Slf4j
 @Component
 public class ToolCallingEngine {
     private static final int MAX_TOOL_ROUNDS = 6;
+    private static final int MAX_TOOL_CALLS_PER_ROUND = 8;
     private final ToolRegistry toolRegistry;
     private final ObjectMapper objectMapper;
 
@@ -48,11 +53,38 @@ public class ToolCallingEngine {
             }
 
             messages.add(toMap(message));
-            for (JsonNode toolCall : toolCalls) {
-                messages.add(executeToolCall(toolCall));
-            }
+            messages.addAll(executeToolCalls(toolCalls));
         }
         throw new IllegalStateException("工具调用轮数超过限制：" + MAX_TOOL_ROUNDS);
+    }
+
+    private List<Map<String, Object>> executeToolCalls(JsonNode toolCalls) {
+        if (toolCalls.size() > MAX_TOOL_CALLS_PER_ROUND) {
+            throw new IllegalStateException(
+                    "单轮工具调用数量超过限制：" + MAX_TOOL_CALLS_PER_ROUND);
+        }
+        if (toolCalls.size() == 1) {
+            return List.of(executeToolCall(toolCalls.get(0)));
+        }
+
+        log.info("开始并行执行工具 count={}", toolCalls.size());
+        try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            List<Future<Map<String, Object>>> futures = new ArrayList<>();
+            for (JsonNode toolCall : toolCalls) {
+                futures.add(executor.submit(() -> executeToolCall(toolCall)));
+            }
+
+            List<Map<String, Object>> results = new ArrayList<>(futures.size());
+            for (Future<Map<String, Object>> future : futures) {
+                results.add(future.get());
+            }
+            return results;
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("并行工具执行被中断", exception);
+        } catch (ExecutionException exception) {
+            throw new IllegalStateException("并行工具执行失败", exception.getCause());
+        }
     }
 
     private Map<String, Object> executeToolCall(JsonNode toolCall) {

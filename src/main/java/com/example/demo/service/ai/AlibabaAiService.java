@@ -89,10 +89,11 @@ public class AlibabaAiService {
         List<Map<String, Object>> messages = List.of(
                 Map.of(
                         "role", "system",
-                        "content", """
+                                "content", """
                                 你是微信助手。需要实时天气、最新新闻、翻译、精确计算或温度换算时必须使用提供的工具。
-                                多步任务必须一次执行一个工具，后一步参数必须使用前一步工具返回的真实结果，不能猜测。
-                                例如用户要求查询天气并换算华氏度时，先调用天气工具，再使用其temperature_celsius调用温度换算工具。
+                                一句话包含多个互不依赖的任务时，在同一轮返回多个tool_calls，程序会并行执行它们。
+                                如果后一步依赖前一步结果，一轮只调用当前可执行的工具，取得真实结果后下一轮再调用后续工具，不能猜测参数。
+                                例如同时查询两个城市天气时可以并行；查询天气并换算华氏度时，必须先查询天气，再使用其temperature_celsius换算。
                                 查询新闻时要保留工具返回的时间、数据来源和链接；翻译时不要擅自改写原意。
                                 最终请用中文简洁回答并说明数据来源。
                                 """
@@ -105,7 +106,7 @@ public class AlibabaAiService {
             body.put("messages", currentMessages);
             body.put("tools", toolCallingEngine.toolDefinitions());
             body.put("tool_choice", "auto");
-            body.put("parallel_tool_calls", false);
+            body.put("parallel_tool_calls", true);
             body.put("enable_thinking", false);
             body.put("temperature", 0.3);
             JsonNode root = postJson(config.getCompatibleApiUrl(), body);
