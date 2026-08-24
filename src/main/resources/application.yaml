@@ -37,3 +37,14 @@ audio:
 weather:
   api-key: ${SENIVERSE_API_KEY:}
   api-url: ${SENIVERSE_API_URL:https://api.seniverse.com/v3/weather/now.json}
+
+rag:
+  enabled: ${RAG_ENABLED:true}
+  knowledge-base: ${RAG_KNOWLEDGE_BASE:classpath:rag/knowledge-base.json}
+  max-results: ${RAG_MAX_RESULTS:3}
+
+skills:
+  daily-brief:
+    default-location: ${DAILY_BRIEF_DEFAULT_LOCATION:北京}
+    default-news-topic: ${DAILY_BRIEF_DEFAULT_NEWS_TOPIC:人工智能}
+    news-limit: ${DAILY_BRIEF_NEWS_LIMIT:3}

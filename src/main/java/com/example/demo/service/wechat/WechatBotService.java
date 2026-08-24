@@ -1,10 +1,11 @@
 package com.example.demo.service.wechat;
 
 import com.example.demo.model.ActionType;
-import com.example.demo.model.IntentResult;
+import com.example.demo.model.MessageRouteResult;
 import com.example.demo.model.ReplyMode;
 import com.example.demo.service.ai.AlibabaAiService;
 import com.example.demo.service.audio.AudioTranscoder;
+import com.example.demo.service.routing.MessageRouter;
 import com.github.wechat.ilink.sdk.ILinkClient;
 import com.github.wechat.ilink.sdk.core.listener.OnLoginListener;
 import com.github.wechat.ilink.sdk.core.listener.OnMessageListener;
@@ -33,6 +34,7 @@ import java.util.concurrent.Executors;
 public class WechatBotService implements DisposableBean {
     private final AlibabaAiService aiService;
     private final AudioTranscoder audioTranscoder;
+    private final MessageRouter messageRouter;
     private ILinkClient client;
     private ExecutorService botExecutor;
 
@@ -47,9 +49,11 @@ public class WechatBotService implements DisposableBean {
 
     public WechatBotService(
             AlibabaAiService aiService,
-            AudioTranscoder audioTranscoder) {
+            AudioTranscoder audioTranscoder,
+            MessageRouter messageRouter) {
         this.aiService = aiService;
         this.audioTranscoder = audioTranscoder;
+        this.messageRouter = messageRouter;
     }
 
     @EventListener(ApplicationReadyEvent.class)
@@ -136,8 +140,8 @@ public class WechatBotService implements DisposableBean {
         log.info("收到微信文本消息 userId={}", fromUserId);
         try {
             client.startTyping(fromUserId);
-            IntentResult intent = aiService.recognizeIntent(userText, ReplyMode.TEXT);
-            executeIntent(fromUserId, intent);
+            MessageRouteResult route = messageRouter.route(userText, ReplyMode.TEXT);
+            executeRoute(fromUserId, route);
         } catch (Exception exception) {
             log.error("处理文本消息失败 userId={}", fromUserId, exception);
             sendErrorMessage(fromUserId, readableError(exception));
@@ -154,8 +158,8 @@ public class WechatBotService implements DisposableBean {
             byte[] wav = audioTranscoder.silkToWav(silk);
             String recognizedText = aiService.transcribeAudio(wav);
             log.info("微信语音识别完成 userId={}", fromUserId);
-            IntentResult intent = aiService.recognizeIntent(recognizedText, ReplyMode.VOICE);
-            executeIntent(fromUserId, intent);
+            MessageRouteResult route = messageRouter.route(recognizedText, ReplyMode.VOICE);
+            executeRoute(fromUserId, route);
         } catch (Exception exception) {
             log.error("处理语音消息失败 userId={}", fromUserId, exception);
             sendErrorMessage(fromUserId, readableError(exception));
@@ -164,18 +168,13 @@ public class WechatBotService implements DisposableBean {
         }
     }
 
-    private void executeIntent(String fromUserId, IntentResult intent) throws Exception {
-        if (intent.action() == ActionType.IMAGE_GENERATION) {
-            byte[] image = aiService.generateImage(intent.content());
-            client.sendImage(fromUserId, image, "qwen-image.png", intent.content());
+    private void executeRoute(String fromUserId, MessageRouteResult route) throws Exception {
+        if (route.action() == ActionType.IMAGE_GENERATION) {
+            byte[] image = aiService.generateImage(route.content());
+            client.sendImage(fromUserId, image, "qwen-image.png", route.content());
             return;
         }
-
-        String prompt = intent.action() == ActionType.WEATHER
-                ? "请查询“" + intent.location() + "”的当前天气。用户原始问题：" + intent.content()
-                : intent.content();
-        String reply = aiService.chatWithTools(prompt);
-        sendReply(fromUserId, reply, intent.replyMode());
+        sendReply(fromUserId, route.content(), route.replyMode());
     }
 
     private void sendReply(String fromUserId, String text, ReplyMode replyMode) throws Exception {

@@ -1,0 +1,26 @@
+[
+  {
+    "id": "rag-basics",
+    "title": "RAG 基础与本项目实现",
+    "keywords": ["RAG", "检索增强生成", "知识库", "关键词检索", "增强Prompt"],
+    "content": "RAG 是 Retrieval-Augmented Generation（检索增强生成）。它先根据用户问题从外部知识库检索相关资料，再把资料与问题一起交给大模型生成答案。本项目实现的是极简关键词检索：对本地 JSON 文档的 keywords 进行包含匹配和评分，命中后把排名靠前的知识片段注入 Prompt。它不使用向量数据库和 Embedding，适合教学与小型固定知识库，但无法理解同义词和复杂语义。"
+  },
+  {
+    "id": "skill-and-tool",
+    "title": "Skill 与 Tool 的区别",
+    "keywords": ["Skill", "技能路由", "自定义技能", "Tool", "工具类", "Function Calling"],
+    "content": "Tool 是一个原子能力，例如查询天气、翻译或计算，通常由大模型通过 Function Calling 选择和填写参数。Skill 是一个可直接匹配、可复用的完整业务流程，可以组合多个 Tool、固定执行顺序并规定输出格式。本项目的每日简报 Skill 在关键词命中后直接编排天气与新闻工具，不需要大模型先判断应该调用哪些工具，因此行为更稳定、成本更可控。Skill 并不是 Tool 的替代品：稳定高频流程适合 Skill，开放式任务仍适合由模型选择 Tool。"
+  },
+  {
+    "id": "project-configuration",
+    "title": "项目 API Key 与启动配置",
+    "keywords": ["API Key", "DASHSCOPE_API_KEY", "SENIVERSE_API_KEY", "怎么配置", "项目启动", "二维码"],
+    "content": "项目通过 DASHSCOPE_API_KEY 读取阿里云百炼密钥，通过 SENIVERSE_API_KEY 读取心知天气私钥。密钥应放在环境变量或被 Git 忽略的 application-local.yml 中，不能提交到 Git。先执行 npm install 和 npm run audio:check，再执行 ./mvnw clean test 与 ./mvnw spring-boot:run。微信登录二维码默认生成在项目根目录的 wechat-login-qr.png。"
+  },
+  {
+    "id": "project-audio",
+    "title": "微信语音处理链路",
+    "keywords": ["SILK", "语音识别", "ASR", "语音合成", "TTS", "WAV", "silk-wasm"],
+    "content": "微信入站语音是 SILK。Java 把字节通过标准输入交给 Node.js，npm silk-wasm 将其解码为 PCM 并添加 WAV 文件头，然后 qwen3-asr-flash 把 WAV 识别成文字。回复语音使用 cosyvoice-v3-flash 生成 WAV，机器人把它作为微信文件发送，不发送语音气泡。解码过程使用内存和进程管道，不保存 SILK、PCM 或 WAV 临时文件。"
+  }
+]

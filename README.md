@@ -1,6 +1,6 @@
 # WeChat iLink Multimodal Bot
 
-一个基于 Spring Boot、微信 iLink SDK 和阿里云百炼构建的多模态微信机器人。项目支持文本聊天、图片理解、图片生成、微信语音识别、WAV 语音文件回复、实时天气、联网新闻、文本翻译以及基于 Function Calling 的工具调用。
+一个基于 Spring Boot、微信 iLink SDK 和阿里云百炼构建的多模态微信机器人。项目支持文本聊天、图片理解、图片生成、微信语音识别、WAV 语音文件回复、实时天气、联网新闻、文本翻译、Function Calling、自定义 Skill 和关键词 RAG。
 
 ## 功能概览
 
@@ -19,6 +19,9 @@
 | 文本翻译 | `qwen-mt-flash` | 已完成 |
 | Function Calling | 工具注册、参数校验、多轮调用 | 已完成 |
 | 多步工具链 | 天气查询 → 温度换算 | 已完成 |
+| 自定义 Skill | 每日简报：天气 + 新闻固定工作流 | 已完成 |
+| 关键词 RAG | 本地 JSON 知识库检索与 Prompt 增强 | 已完成 |
+| 分层消息路由 | Skill → RAG → LLM | 已完成 |
 
 ## 技术栈
 
@@ -47,18 +50,31 @@
 │   ├── config
 │   │   ├── AiConfig.java                # 百炼模型和接口配置
 │   │   ├── AudioConfig.java             # Node 解码器配置
+│   │   ├── DailyBriefSkillConfig.java   # 每日简报默认参数
+│   │   ├── RagConfig.java               # RAG 开关和知识库配置
 │   │   └── WeatherConfig.java           # 心知天气配置
 │   ├── model
 │   │   ├── ActionType.java              # 用户动作类型
 │   │   ├── IntentResult.java            # 意图识别结果
+│   │   ├── MessageRouteResult.java       # 消息路由执行结果
+│   │   ├── MessageRouteType.java         # Skill、RAG 或 LLM 路由来源
 │   │   ├── ReplyMode.java               # 文本或语音文件回复
 │   │   └── WeatherInfo.java             # 天气数据
+│   ├── rag
+│   │   ├── KeywordRagService.java        # 关键词评分、检索和 Prompt 增强
+│   │   ├── KnowledgeDocument.java        # 知识文档模型
+│   │   └── RagContext.java               # 检索上下文
 │   ├── service
 │   │   ├── ai/AlibabaAiService.java     # 聊天、视觉、生图、ASR、TTS
 │   │   ├── ai/AlibabaToolService.java   # 新闻搜索和翻译模型客户端
 │   │   ├── audio/AudioTranscoder.java   # Java 与 npm 解码进程通信
+│   │   ├── routing/MessageRouter.java    # Skill → RAG → LLM 总路由
 │   │   ├── weather/WeatherService.java  # 心知天气 HTTP 客户端
 │   │   └── wechat/WechatBotService.java # 微信登录、消息处理和回复
+│   ├── skill
+│   │   ├── BotSkill.java                 # 自定义 Skill 统一接口
+│   │   ├── SkillRegistry.java            # Skill 注册和关键词匹配
+│   │   └── DailyBriefSkill.java          # 天气 + 新闻每日简报 Skill
 │   └── tool
 │       ├── BotTool.java                 # 工具统一接口
 │       ├── ToolRegistry.java            # 工具注册与参数校验
@@ -69,7 +85,8 @@
 │       ├── NewsTool.java                # 联网新闻工具
 │       └── TranslationTool.java         # 文本翻译工具
 ├── src/main/resources
-│   └── application.yaml                 # 公共配置和环境变量映射
+│   ├── application.yaml                 # 公共配置和环境变量映射
+│   └── rag/knowledge-base.json           # 本地 RAG 知识库
 └── src/test/java/com/example/demo       # Spring 与工具单元测试
 ```
 
@@ -154,6 +171,12 @@ weather:
 | `SILK_DECODER_SCRIPT` | `scripts/decode-silk.mjs` | npm SILK 解码脚本路径 |
 | `SILK_SAMPLE_RATE` | `24000` | 解码输出采样率 |
 | `SILK_DECODE_TIMEOUT_SECONDS` | `30` | 单次解码超时时间 |
+| `RAG_ENABLED` | `true` | 是否启用关键词 RAG |
+| `RAG_KNOWLEDGE_BASE` | `classpath:rag/knowledge-base.json` | RAG 知识库位置 |
+| `RAG_MAX_RESULTS` | `3` | 最多注入的知识片段数，最大为 10 |
+| `DAILY_BRIEF_DEFAULT_LOCATION` | `北京` | 每日简报默认城市 |
+| `DAILY_BRIEF_DEFAULT_NEWS_TOPIC` | `人工智能` | 每日简报默认新闻主题 |
+| `DAILY_BRIEF_NEWS_LIMIT` | `3` | 每日简报新闻条数，范围 1～10 |
 
 ## 消息处理流程
 
@@ -162,8 +185,10 @@ weather:
 ```text
 微信文本
   → WechatBotService
-  → 意图识别
-  → 聊天 / 图片生成 / 天气或其他工具
+  → MessageRouter
+  → Skill关键词命中？直接执行Skill并回复
+  → RAG关键词命中？检索知识并增强Prompt
+  → 都未命中？进入LLM意图识别和闲聊/工具调用
   → 文本或 WAV 文件回复
 ```
 
@@ -187,13 +212,80 @@ weather:
   → Node.js 添加 WAV 文件头
   → WAV 字节从标准输出返回 Java
   → qwen3-asr-flash 识别文字
-  → 意图识别和工具调用
+  → Skill / RAG / LLM 分层路由
   → CosyVoice 生成 WAV 回复文件
 ```
 
 项目不再携带 `silk_codec` 本地可执行文件，也不再根据 macOS、Linux 或 CPU 架构维护不同二进制。Java 和 Node.js 通过标准输入输出传输音频，解码过程中不会创建 SILK、PCM 或 WAV 临时文件。
 
 需要注意：npm 方案仍然会在运行机器上通过 WebAssembly 完成音频计算，只是不依赖平台相关的本地可执行文件。
+
+## Skill 与 RAG
+
+### Tool、Skill、RAG 分别解决什么问题？
+
+| 机制 | 主要职责 | 谁决定是否执行 | 本项目示例 |
+| --- | --- | --- | --- |
+| Tool | 提供单一、可复用的原子能力 | LLM 根据 Function Calling 描述选择 | 天气、新闻、翻译、计算 |
+| Skill | 固化一个高频业务流程，可组合多个 Tool | Java 关键词路由直接命中 | 每日简报同时执行天气和新闻 |
+| RAG | 为模型补充外部或项目私有知识 | Java 先检索，命中后增强 Prompt | 配置、语音链路、RAG/Skill 项目知识 |
+
+现有 Tool 并不是“不满足条件”。它们适合参数开放、组合方式不固定的任务，但高频固定流程如果每次都让模型重新规划，会增加模型判断、Token 消耗和结果不确定性。Skill 把已知流程固化，能让系统表现得更稳定、更快、更可控；它提升的是应用层的任务执行能力，并不会直接提升大模型本身的推理能力。
+
+RAG 的业务意义是让模型在回答前读取可维护的外部知识。模型不需要重新训练，只要修改知识库就能更新项目事实，还能减少凭记忆回答造成的幻觉。当前版本是教学用的关键词检索，不使用 Embedding 和向量数据库，因此实现简单、成本低，但对同义词、语义相似和长文档召回的处理能力有限。
+
+### 完整路由顺序
+
+```text
+用户文本或ASR识别结果
+  → 命中Skill关键词？
+      → 是：SkillRegistry执行Skill → 直接回复
+      → 否：继续
+  → 命中RAG知识关键词？
+      → 是：检索Top-K知识片段 → 增强Prompt → LLM回复
+      → 否：继续
+  → LLM意图识别与兜底
+      → 图片生成 / Function Calling / 普通闲聊
+```
+
+Skill 优先于 RAG。例如一句话同时包含“每日简报”和“RAG”，会先执行每日简报，不会进入知识问答。这样可以保证明确业务指令优先于开放式问答。
+
+### 自定义每日简报 Skill
+
+`DailyBriefSkill` 监听“生成每日简报”“今日简报”“每日简报”，并行调用天气与新闻 Tool，然后按照固定格式组合结果。推荐使用明确参数：
+
+```text
+生成每日简报 城市=上海，主题=大模型
+```
+
+城市或主题未提供时，使用配置中的默认值。单个工具失败时，简报会显示对应部分的错误，另一个工具仍能正常返回。
+
+新增 Skill 时，实现 `BotSkill`、声明唯一名称与关键词，并添加 `@Component`。`SkillRegistry` 会自动注册；当多个关键词同时命中时，优先使用更长、更具体的关键词。
+
+### 极简关键词 RAG
+
+知识库存放在 `src/main/resources/rag/knowledge-base.json`。每条文档包含 `id`、`title`、`keywords` 和 `content`。检索过程如下：
+
+```text
+用户问题标准化
+  → 检查每篇文档的keywords
+  → 按命中关键词长度累计分数
+  → 分数降序选取Top-K文档
+  → 拼接为<retrieved_knowledge>
+  → 与原问题一起发送给LLM
+```
+
+开启和关闭 RAG 的对比方式：
+
+```bash
+RAG_ENABLED=true ./mvnw spring-boot:run
+# 向机器人发送：RAG是什么，它在这个项目中怎么实现？
+
+RAG_ENABLED=false ./mvnw spring-boot:run
+# 再发送同一句话，对比回答是否包含项目知识和“知识来源：本地RAG知识库”
+```
+
+自动测试也覆盖了同一句问题在开启时命中 RAG、关闭时回退到直接 LLM 路由的行为。
 
 ## Function Calling
 
@@ -287,6 +379,9 @@ weather:
 - `查询上海天气，并把温度换算成华氏度`
 - `查询今天的人工智能新闻，返回 3 条并附来源`
 - `把“你好，世界”翻译成英文`
+- `生成每日简报 城市=上海，主题=大模型`
+- `RAG是什么，它在这个项目中怎么实现？`
+- `API Key应该配置在哪里？`
 - `用语音介绍一下杭州`
 - 直接发送一段微信语音
 
@@ -318,6 +413,9 @@ npm run audio:check
 - WAV 文件形式的语音回复
 - 天气、计算器、温度换算、联网新闻和文本翻译
 - 天气 → 温度换算的多步工具调用
+- 每日简报 Skill 的天气、新闻组合结果
+- RAG 开启时命中知识库，关闭时回退 LLM
+- 同时包含 Skill 与 RAG 关键词时优先执行 Skill
 - API Key 缺失和第三方 API 异常提示
 
 ## 常见问题
@@ -351,6 +449,7 @@ npm run audio:check
 
 - 不要提交真实 API Key、二维码、下载图片或本地配置。
 - 工具参数始终视为不可信输入，并在 Java 侧校验。
+- Skill 关键词和 RAG 文档内容需要经过代码审查，避免把不可信指令直接注入系统 Prompt。
 - 为第三方 HTTP API 配置连接和读取超时。
 - 新闻、搜索、电影等工具应使用有授权的数据源。
 - 待办工具上线前必须实现微信用户隔离和访问控制。
