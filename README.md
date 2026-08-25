@@ -1,6 +1,6 @@
 # WeChat iLink Multimodal Bot
 
-一个基于 Spring Boot、微信 iLink SDK 和阿里云百炼构建的多模态微信机器人。项目支持文本聊天、图片理解、图片生成、微信语音识别、WAV 语音文件回复、实时天气、联网新闻、文本翻译、Function Calling、自定义 Skill、关键词 RAG，以及自主规划型 Agent 的目标拆解与任务状态管理。
+一个基于 Spring Boot、微信 iLink SDK 和阿里云百炼构建的多模态微信机器人。项目支持文本聊天、图片理解、图片生成、微信语音识别、WAV 语音文件回复、实时天气、联网新闻、文本翻译、Function Calling、自定义 Skill 和关键词 RAG。
 
 ## 功能概览
 
@@ -22,9 +22,6 @@
 | 自定义 Skill | 每日简报：天气 + 新闻固定工作流 | 已完成 |
 | 关键词 RAG | 本地 JSON 知识库检索与 Prompt 增强 | 已完成 |
 | 分层消息路由 | Skill → RAG → LLM | 已完成 |
-| Agent 规划层 | 高层目标拆解、DAG 校验、失败修复 | 已完成 |
-| Agent 状态机 | 依赖解锁、重试、失败与跳过 | 已完成 |
-| Agent 执行器 | 自动领取任务并调用成员工具 | 待团队后续接入 |
 
 ## 技术栈
 
@@ -50,12 +47,7 @@
 │   └── decode-silk.mjs                  # SILK → PCM → WAV 解码脚本
 ├── src/main/java/com/example/demo
 │   ├── DemoApplication.java             # Spring Boot 入口
-│   ├── agent
-│   │   ├── model                         # 能力、任务定义和执行计划
-│   │   ├── planner                       # LLM规划、能力目录和DAG校验
-│   │   └── state                         # 任务与整次运行的状态机
 │   ├── config
-│   │   ├── AgentConfig.java             # Agent规划约束
 │   │   ├── AiConfig.java                # 百炼模型和接口配置
 │   │   ├── AudioConfig.java             # Node 解码器配置
 │   │   ├── DailyBriefSkillConfig.java   # 每日简报默认参数
@@ -168,7 +160,6 @@ weather:
 | `WECHAT_QR_CODE_PATH` | `wechat-login-qr.png` | 登录二维码位置 |
 | `DASHSCOPE_CHAT_MODEL` | `qwen-flash` | 聊天模型 |
 | `DASHSCOPE_INTENT_MODEL` | `qwen-flash` | 意图识别模型 |
-| `DASHSCOPE_PLANNER_MODEL` | `qwen-plus` | Agent 任务规划模型 |
 | `DASHSCOPE_SEARCH_MODEL` | `qwen-plus` | 新闻联网搜索模型 |
 | `DASHSCOPE_TRANSLATION_MODEL` | `qwen-mt-flash` | 专用翻译模型 |
 | `DASHSCOPE_VISION_MODEL` | `qwen3-vl-flash` | 图片理解模型 |
@@ -186,9 +177,6 @@ weather:
 | `DAILY_BRIEF_DEFAULT_LOCATION` | `北京` | 每日简报默认城市 |
 | `DAILY_BRIEF_DEFAULT_NEWS_TOPIC` | `人工智能` | 每日简报默认新闻主题 |
 | `DAILY_BRIEF_NEWS_LIMIT` | `3` | 每日简报新闻条数，范围 1～10 |
-| `AGENT_MIN_TASKS` | `3` | 单个 Agent 计划的最少任务数 |
-| `AGENT_MAX_TASKS` | `12` | 单个 Agent 计划的最多任务数 |
-| `AGENT_MAX_PLANNING_ATTEMPTS` | `2` | 非法计划自动修复次数上限 |
 
 ## 消息处理流程
 
@@ -298,49 +286,6 @@ RAG_ENABLED=false ./mvnw spring-boot:run
 ```
 
 自动测试也覆盖了同一句问题在开启时命中 RAG、关闭时回退到直接 LLM 路由的行为。
-
-## 自主规划型 Agent
-
-当前完成的是成员一负责的规划和状态管理模块。它负责把一句高层目标变成可执行任务图，并记录执行进度；项目扫描、安全检查、测试执行和最终报告工具由其他成员继续实现，完整执行器接入前不会在微信中宣称目标已经完成。
-
-### 目标拆解流程
-
-```text
-用户高层目标
-  → AgentCapabilityCatalog收集当前真实存在的Tool、Skill、RAG和LLM能力
-  → qwen-plus生成结构化AgentPlan
-  → AgentPlanValidator检查任务数量、能力名称和依赖关系
-  → 不合法时把错误反馈给模型，自动修复一次
-  → 得到经过校验的DAG任务计划
-  → AgentStateMachine创建运行实例并解锁首批READY任务
-```
-
-规划器只能使用能力目录中的名称，不能编造不存在的工具。一个合法计划必须满足：
-
-- 包含 3～12 个不同子任务，并使用至少两种能力。
-- 每个任务声明能力、前置依赖、预期输出和最大尝试次数。
-- 依赖关系不能引用未知任务、不能依赖自身、不能形成环。
-- 没有数据依赖的任务可以同时处于 `READY`，供未来执行器并行执行。
-- 必须有一个最终汇总任务，通过直接或间接依赖覆盖全部前置任务，确保输出完整成品。
-
-### 任务状态机
-
-```text
-PENDING ──前置任务全部成功──→ READY ──领取──→ RUNNING
-                                      ├─ 成功 → SUCCEEDED
-                                      └─ 失败 → 未超次数：READY
-                                                超出次数：FAILED
-
-依赖FAILED或SKIPPED任务的后续任务 → SKIPPED
-全部任务成功 → Agent运行状态SUCCEEDED
-全部任务结束且存在失败/跳过 → Agent运行状态FAILED
-```
-
-后续执行器只需要调用 `readyTasks` 领取当前可运行任务，执行前调用 `startTask`，然后根据工具结果调用 `succeedTask` 或 `failTask`。状态机不会把失败任务伪装成成功，也不会在依赖结果缺失时提前运行后续任务。
-
-### 与团队后续模块的接口
-
-其他成员新增实现 `BotTool` 或 `BotSkill` 的 Spring 组件后，`AgentCapabilityCatalog` 会自动把它加入规划能力清单，不需要修改 Planner 的判断代码。完整 Agent 执行器应负责读取任务的 `capability`、传递前置任务结果、调用对应能力，并把最终报告发送回微信。
 
 ## Function Calling
 
@@ -471,8 +416,6 @@ npm run audio:check
 - 每日简报 Skill 的天气、新闻组合结果
 - RAG 开启时命中知识库，关闭时回退 LLM
 - 同时包含 Skill 与 RAG 关键词时优先执行 Skill
-- Agent 非法计划自动修复、未知能力和循环依赖拦截
-- Agent 任务依赖解锁、失败重试和后续任务跳过
 - API Key 缺失和第三方 API 异常提示
 
 ## 常见问题

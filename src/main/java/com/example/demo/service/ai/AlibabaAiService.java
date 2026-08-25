@@ -118,23 +118,6 @@ public class AlibabaAiService {
         });
     }
 
-    public String createAgentPlan(String planningPrompt) {
-        requireApiKey();
-        Map<String, Object> body = Map.of(
-                "model", config.getPlannerModel(),
-                "messages", List.of(
-                        Map.of(
-                                "role", "system",
-                                "content", "你是自主规划型Agent的任务规划器，只输出合法JSON对象。"),
-                        Map.of("role", "user", "content", planningPrompt)
-                ),
-                "response_format", Map.of("type", "json_object"),
-                "enable_thinking", false,
-                "temperature", 0.2
-        );
-        return chatCompletion(body);
-    }
-
     public String understandImage(byte[] imageBytes, String mimeType) {
         requireApiKey();
         String dataUrl = "data:" + mimeType + ";base64,"

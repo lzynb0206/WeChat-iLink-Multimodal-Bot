@@ -13,7 +13,6 @@ public class AiConfig {
     private String apiUrl = "https://dashscope.aliyuncs.com/api/v1";
     private String chatModel = "qwen-flash";
     private String intentModel = "qwen-flash";
-    private String plannerModel = "qwen-plus";
     private String searchModel = "qwen-plus";
     private String translationModel = "qwen-mt-flash";
     private String visionModel = "qwen3-vl-flash";
