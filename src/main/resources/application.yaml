@@ -20,6 +20,7 @@ dashscope:
   api-url: ${DASHSCOPE_API_URL:https://dashscope.aliyuncs.com/api/v1}
   chat-model: ${DASHSCOPE_CHAT_MODEL:qwen-flash}
   intent-model: ${DASHSCOPE_INTENT_MODEL:qwen-flash}
+  planner-model: ${DASHSCOPE_PLANNER_MODEL:qwen-plus}
   search-model: ${DASHSCOPE_SEARCH_MODEL:qwen-plus}
   translation-model: ${DASHSCOPE_TRANSLATION_MODEL:qwen-mt-flash}
   vision-model: ${DASHSCOPE_VISION_MODEL:qwen3-vl-flash}
@@ -48,3 +49,8 @@ skills:
     default-location: ${DAILY_BRIEF_DEFAULT_LOCATION:北京}
     default-news-topic: ${DAILY_BRIEF_DEFAULT_NEWS_TOPIC:人工智能}
     news-limit: ${DAILY_BRIEF_NEWS_LIMIT:3}
+
+agent:
+  min-tasks: ${AGENT_MIN_TASKS:3}
+  max-tasks: ${AGENT_MAX_TASKS:12}
+  max-planning-attempts: ${AGENT_MAX_PLANNING_ATTEMPTS:2}
