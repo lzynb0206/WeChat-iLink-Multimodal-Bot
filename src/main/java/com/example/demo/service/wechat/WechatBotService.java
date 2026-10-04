@@ -64,7 +64,7 @@ public class WechatBotService implements DisposableBean {
         }
         botExecutor = Executors.newSingleThreadExecutor(task -> {
             Thread thread = new Thread(task, "wechat-ilink-login");
-            thread.setDaemon(true);
+            thread.setDaemon(false);
             return thread;
         });
         botExecutor.submit(this::startBot);
